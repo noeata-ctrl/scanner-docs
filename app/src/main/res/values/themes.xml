@@ -1,0 +1,10 @@
+<resources>
+    <color name="azul">#2346FF</color>
+    <color name="fundo">#FFFFFF</color>
+    <style name="AppTheme" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">@color/azul</item>
+        <item name="android:navigationBarColor">#0B0C0F</item>
+        <item name="android:windowBackground">@color/fundo</item>
+        <item name="android:colorAccent">@color/azul</item>
+    </style>
+</resources>

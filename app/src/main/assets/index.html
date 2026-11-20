@@ -315,9 +315,9 @@ function getDl() {
 setTimeout(getDl, 300);
 const NATIVE = !!window.AndroidBridge;
 const b64 = blob => new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1]); fr.onerror = rej; fr.readAsDataURL(blob); });
-async function saveFile(blob, name) {
+async function saveFile(blob, name, mode) {
   if (NATIVE) {
-    const r = await dialog({ title: name, body: '<p>O que deseja fazer com o arquivo?</p>', actions: [{ label: 'Compartilhar', v: 'share' }, { label: 'Salvar no celular', v: 'save', pri: 1 }] });
+    const r = mode ? { v: mode } : await dialog({ title: name, body: '<p>O que deseja fazer com o arquivo?</p>', actions: [{ label: 'Compartilhar', v: 'share' }, { label: 'Salvar no celular', v: 'save', pri: 1 }] });
     if (!r.v) return;
     busy('Preparando arquivo…'); await tick();
     try {
@@ -524,8 +524,33 @@ function rotate(cv, r) {
   x.translate(o.width / 2, o.height / 2); x.rotate(r * Math.PI / 2); x.drawImage(cv, -cv.width / 2, -cv.height / 2);
   return o;
 }
-let worker = null, wid = 0;
+const QM = [1700, 0.72], QL = [1150, 0.5]; // qualidade Média e Baixa: lado maior em px, qualidade JPEG
+let worker = null, wid = 0, pool = null, rr = 0;
 const wjobs = new Map(), wkeys = new Map();
+let workerURL = null;
+function spawn() {
+  const w = new Worker(workerURL);
+  w.onmessage = e => { const j = wjobs.get(e.data.id); if (!j) return; wjobs.delete(e.data.id); e.data.error ? j.rej(new Error(e.data.error)) : j.res(e.data); };
+  w.onerror = () => { for (const j of wjobs.values()) j.rej(new Error('worker')); wjobs.clear(); if (w === worker) worker = false; pool = null; };
+  return w;
+}
+function getPool() {
+  if (pool) return pool;
+  if (!getWorker()) return null;
+  const n = Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 4) - 1));
+  pool = [worker]; try { for (let i = 1; i < n; i++) pool.push(spawn()); } catch (e) { }
+  return pool;
+}
+function resizeBlob(blob, [max, q]) {
+  const ps = getPool();
+  if (ps) return new Promise((res, rej) => { const id = ++wid; wjobs.set(id, { res, rej }); ps[rr++ % ps.length].postMessage({ t: 'resize', id, blob, max, q }); }).catch(() => resizeMain(blob, max, q));
+  return resizeMain(blob, max, q);
+}
+async function resizeMain(blob, max, q) {
+  const bmp = await loadBitmap(blob), W = bmp.width || bmp.naturalWidth, H = bmp.height || bmp.naturalHeight, k = Math.min(1, max / Math.max(W, H));
+  const cv = mk(Math.round(W * k), Math.round(H * k)); cv.getContext('2d').drawImage(bmp, 0, 0, cv.width, cv.height); if (bmp.close) bmp.close();
+  return { blob: await toBlob(cv, 'image/jpeg', q), w: cv.width, h: cv.height };
+}
 function getWorker() {
   if (worker !== null) return worker;
   try {
@@ -533,24 +558,26 @@ function getWorker() {
     const code = `const mk=(w,h)=>new OffscreenCanvas(w,h);const cx=c=>c.getContext('2d',{willReadFrequently:true});
 ${[homography, warp, background, filterImg, rotate].map(f => f.toString()).join('\n')}
 const cache=new Map();
-onmessage=async e=>{const {id,pid,key,bmp,quad,filter,rot}=e.data;try{
+async function enc(cv,max,q){const k=Math.min(1,max/Math.max(cv.width,cv.height));let c=cv;if(k<1){c=mk(Math.round(cv.width*k),Math.round(cv.height*k));const g=c.getContext('2d');g.imageSmoothingQuality='high';g.drawImage(cv,0,0,c.width,c.height);}return {blob:await c.convertToBlob({type:'image/jpeg',quality:q}),w:c.width,h:c.height};}
+onmessage=async e=>{const {id,t}=e.data;
+if(t==='resize'){try{const b=await createImageBitmap(e.data.blob);const c=mk(b.width,b.height);c.getContext('2d').drawImage(b,0,0);if(b.close)b.close();const r=await enc(c,e.data.max,e.data.q);postMessage({id,blob:r.blob,w:r.w,h:r.h});}catch(err){postMessage({id,error:String(err&&err.message||err)})}return;}
+const {pid,key,bmp,quad,filter,rot}=e.data;try{
  let wc=cache.get(pid);
  if(!wc||wc.k!==key){ if(!bmp) throw new Error('nosrc'); const c=mk(bmp.width,bmp.height); cx(c).drawImage(bmp,0,0); if(bmp.close) bmp.close(); wc={k:key,img:warp(c,quad,2200)}; cache.delete(pid); cache.set(pid,wc); while(cache.size>4) cache.delete(cache.keys().next().value); }
  else if(bmp&&bmp.close) bmp.close();
  const f=filterImg(wc.img,filter); let cv=mk(f.width,f.height); cv.getContext('2d').putImageData(f,0,0); cv=rotate(cv,rot);
- const blob=await cv.convertToBlob({type:'image/jpeg',quality:0.88});
- postMessage({id,blob,w:cv.width,h:cv.height});
+ const full=await enc(cv,1e9,0.88), med=await enc(cv,${QM[0]},${QM[1]});
+ postMessage({id,blob:full.blob,w:full.w,h:full.h,mblob:med.blob,mw:med.w,mh:med.h});
 }catch(err){postMessage({id,error:String(err&&err.message||err)})}};`;
-    worker = new Worker(URL.createObjectURL(new Blob([code], { type: 'text/javascript' })));
-    worker.onmessage = e => { const j = wjobs.get(e.data.id); if (!j) return; wjobs.delete(e.data.id); e.data.error ? j.rej(new Error(e.data.error)) : j.res(e.data); };
-    worker.onerror = () => { for (const j of wjobs.values()) j.rej(new Error('worker')); wjobs.clear(); worker = false; };
+    workerURL = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
+    worker = spawn();
   } catch (e) { worker = false; }
   return worker;
 }
 function runWorker(p, key, bmp) {
   return new Promise((res, rej) => {
     const id = ++wid; wjobs.set(id, { res, rej });
-    worker.postMessage({ id, pid: p.id, key, bmp, quad: p.quad, filter: p.filter, rot: p.rot }, bmp ? [bmp] : []);
+    worker.postMessage({ t: 'proc', id, pid: p.id, key, bmp, quad: p.quad, filter: p.filter, rot: p.rot }, bmp ? [bmp] : []);
   });
 }
 async function processMain(p, key) {
@@ -560,7 +587,10 @@ async function processMain(p, key) {
   const f = filterImg(wc.img, p.filter);
   let cv = mk(f.width, f.height); cv.getContext('2d').putImageData(f, 0, 0);
   cv = rotate(cv, p.rot);
-  return { blob: await toBlob(cv, 'image/jpeg', 0.88), w: cv.width, h: cv.height };
+  const blob = await toBlob(cv, 'image/jpeg', 0.88);
+  const k = Math.min(1, QM[0] / Math.max(cv.width, cv.height)), m = mk(Math.round(cv.width * k), Math.round(cv.height * k));
+  m.getContext('2d').drawImage(cv, 0, 0, m.width, m.height);
+  return { blob, w: cv.width, h: cv.height, mblob: await toBlob(m, 'image/jpeg', QM[1]), mw: m.width, mh: m.height };
 }
 async function processPage(p) {
   const key = p.quad.map(v => v.map(z => z.toFixed(1)).join(',')).join(';');
@@ -574,7 +604,7 @@ async function processPage(p) {
     } catch (e) { r = null; }
   }
   if (!r) r = await processMain(p, key);
-  p.out = r.blob; p.ow = r.w; p.oh = r.h;
+  p.out = r.blob; p.ow = r.w; p.oh = r.h; p.outM = r.mblob; p.mw = r.mw; p.mh = r.mh; p.v = Date.now();
   await put('pages', p);
 }
 async function makePage(file) {
@@ -941,6 +971,7 @@ function buildPdf(imgs, mode) {
 }
 let lastSize = 'a4', lastQ = 'm';
 try { lastSize = localStorage.getItem('pdfSize') || 'a4'; lastQ = localStorage.getItem('pdfQ') || 'm'; } catch (e) { }
+let pdfCache = null;
 $('#dPdf').onclick = async () => {
   const opt = (v, l, cur) => `<option value="${v}"${v === cur ? ' selected' : ''}>${l}</option>`;
   const r = await dialog({
@@ -949,32 +980,42 @@ $('#dPdf').onclick = async () => {
       <label>Nome do arquivo<input id="xName" value="${esc(curDoc.name)}"></label>
       <label>Tamanho da página<select id="xSize">${opt('a4', 'A4', lastSize)}${opt('letter', 'Carta', lastSize)}${opt('fit', 'Igual à imagem', lastSize)}</select></label>
       <label>Qualidade<select id="xQ">${opt('h', 'Alta', lastQ)}${opt('m', 'Média (recomendada)', lastQ)}${opt('l', 'Baixa (para e-mail e WhatsApp)', lastQ)}</select></label>`,
-    actions: [{ label: 'Cancelar', v: null }, { label: 'Gerar PDF', v: 'ok', pri: 1 }],
+    actions: NATIVE
+      ? [{ label: 'Cancelar', v: null }, { label: 'Compartilhar', v: 'share' }, { label: 'Salvar', v: 'save', pri: 1 }]
+      : [{ label: 'Cancelar', v: null }, { label: 'Gerar PDF', v: 'ok', pri: 1 }],
     read: () => ({ name: $('#xName').value, size: $('#xSize').value, q: $('#xQ').value })
   });
-  if (r.v !== 'ok') return;
+  if (!r.v) return;
   lastSize = r.data.size; lastQ = r.data.q;
   try { localStorage.setItem('pdfSize', lastSize); localStorage.setItem('pdfQ', lastQ); } catch (e) { }
-  const ps = await docPages(curDoc), imgs = [];
+  const name = fileName(r.data.name || curDoc.name) + '.pdf', mode = NATIVE ? r.v : undefined;
   try {
-    for (let i = 0; i < ps.length; i++) {
-      busy(`Preparando página ${i + 1} de ${ps.length}…`); await tick();
-      const p = ps[i]; let blob = p.out, w = p.ow, h = p.oh;
-      if (r.data.q !== 'h') {
-        const max = r.data.q === 'm' ? 1700 : 1150, qq = r.data.q === 'm' ? 0.72 : 0.5, k = Math.min(1, max / Math.max(w, h));
-        const bmp = await loadBitmap(blob), cv = mk(Math.round(w * k), Math.round(h * k));
-        cv.getContext('2d').drawImage(bmp, 0, 0, cv.width, cv.height); if (bmp.close) bmp.close();
-        blob = await toBlob(cv, 'image/jpeg', qq); w = cv.width; h = cv.height;
-      }
-      imgs.push({ bytes: new Uint8Array(await blob.arrayBuffer()), w, h });
+    const ps = await docPages(curDoc), q = r.data.q;
+    const key = q + '|' + r.data.size + '|' + ps.map(p => p.id + ':' + (p.v || 0)).join(',');
+    let pdf = pdfCache && pdfCache.key === key ? pdfCache.blob : null;
+    if (!pdf) {
+      let done = 0; const total = ps.length;
+      busy(`Preparando ${total} ${total === 1 ? 'página' : 'páginas'}…`);
+      const imgs = await Promise.all(ps.map(async p => {
+        let im;
+        if (q === 'h') im = { blob: p.out, w: p.ow, h: p.oh };
+        else if (q === 'm' && p.outM) im = { blob: p.outM, w: p.mw, h: p.mh };
+        else {
+          im = await resizeBlob(p.out, q === 'm' ? QM : QL);
+          if (q === 'm') { p.outM = im.blob; p.mw = im.w; p.mh = im.h; put('pages', p); }
+        }
+        const bytes = new Uint8Array(await im.blob.arrayBuffer());
+        done++; if (total > 3) busy(`Preparando página ${done} de ${total}…`);
+        return { bytes, w: im.w, h: im.h };
+      }));
+      busy('Gerando PDF…');
+      pdf = new Blob([buildPdf(imgs, r.data.size)], { type: 'application/pdf' });
+      pdfCache = { key, blob: pdf };
     }
-    busy('Gerando PDF…'); await tick();
-    const pdf = new Blob([buildPdf(imgs, r.data.size)], { type: 'application/pdf' });
     busy();
-    await saveFile(pdf, fileName(r.data.name || curDoc.name) + '.pdf');
+    await saveFile(pdf, name, mode);
   } catch (e) { busy(); toast('Erro ao gerar o PDF'); console.error(e); }
 };
-
 window.appBack = () => {
   if (!$('#busy').hidden) return true;
   if (!$('#modal').hidden) { $('#modal').hidden = true; return true; }

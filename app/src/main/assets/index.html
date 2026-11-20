@@ -92,6 +92,22 @@ svg.i{width:22px;height:22px;flex:none;fill:none;stroke:currentColor;stroke-widt
 #busy div{background:#14161a;border-radius:16px;padding:18px 22px;display:flex;gap:12px;align-items:center;font-weight:700}
 .spin{width:22px;height:22px;border:3px solid #ffffff44;border-top-color:#fff;border-radius:50%;animation:sp .8s linear infinite}
 @keyframes sp{to{transform:rotate(1turn)}}
+/* câmera ao vivo */
+.cam{flex:1;position:relative;overflow:hidden;background:#000}
+.cam video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+#camSvg{position:absolute;pointer-events:none;overflow:visible}
+#camFlash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none;transition:opacity .3s}
+#camFlash.on{opacity:.85;transition:none}
+.cmsg{position:absolute;left:50%;top:14px;transform:translateX(-50%);background:rgb(0 0 0/.62);padding:8px 16px;border-radius:20px;font-weight:700;font-size:14px;margin:0;white-space:nowrap}
+.cbot{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:14px 18px calc(16px + env(safe-area-inset-bottom));gap:10px}
+.shut{width:80px;height:80px;border-radius:50%;border:0;padding:6px;cursor:pointer;background:conic-gradient(var(--acc) calc(var(--p,0)*1turn),#ffffff 0)}
+.shut::after{content:"";display:block;width:100%;height:100%;border-radius:50%;background:#fff;box-shadow:inset 0 0 0 3px #0b0c0f}
+.shut:active::after{background:#dfe4ff}
+.cthumb{width:58px;height:58px;border-radius:10px;border:2px solid #fff;background:#222 center/cover;position:relative;justify-self:start;padding:0;cursor:pointer}
+.cthumb b{position:absolute;top:-9px;right:-9px;background:var(--acc);color:#fff;border-radius:11px;min-width:22px;padding:0 6px;font-size:13px;line-height:22px}
+.cdone{justify-self:end}
+.tog{min-height:40px;padding:0 14px;border-radius:20px;border:1px solid #3a404c;background:transparent;font-weight:700;font-size:14px;cursor:pointer}
+.tog[aria-pressed=true]{background:#fff;color:#0b0c0f;border-color:#fff}
 #toast{position:fixed;left:50%;bottom:calc(150px + env(safe-area-inset-bottom));transform:translate(-50%,20px);background:#14161a;color:#fff;padding:12px 18px;border-radius:12px;opacity:0;transition:.25s;z-index:40;pointer-events:none;max-width:90vw;text-align:center;font-weight:600}
 #toast.on{opacity:1;transform:translate(-50%,0)}
 @media(max-width:600px){.hero{grid-template-columns:minmax(0,1fr) 120px;padding-top:22px}.hero p{font-size:15px}.tool{font-size:11px}}
@@ -112,6 +128,8 @@ svg.i{width:22px;height:22px;flex:none;fill:none;stroke:currentColor;stroke-widt
  <symbol id="i-wand" viewBox="0 0 24 24"><path d="m4 20 11-11m-2-2 4 4M17 3v3m-1.5-1.5h3M20 9v2m-1-1h2"/></symbol>
  <symbol id="i-full" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></symbol>
  <symbol id="i-merge" viewBox="0 0 24 24"><rect x="3" y="3" width="10" height="13" rx="1"/><path d="M8 21h11a2 2 0 0 0 2-2V8"/><path d="M17 12v-4h-4"/></symbol>
+ <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+ <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></symbol>
  <symbol id="i-pdf" viewBox="0 0 24 24"><path d="M6 2h9l5 5v15H6z"/><path d="M14 2v6h6M9 14h6M9 18h4"/></symbol>
 </svg>
 
@@ -202,6 +220,27 @@ svg.i{width:22px;height:22px;flex:none;fill:none;stroke:currentColor;stroke-widt
  </div>
 </section>
 
+<!-- CÂMERA AO VIVO -->
+<section id="v-cam" class="view dark" hidden>
+ <div class="top">
+  <button class="ic" id="kClose" aria-label="Fechar câmera"><svg class="i"><use href="#i-x"/></svg></button>
+  <span class="t"><button class="tog" id="kAuto" aria-pressed="true">Captura automática</button></span>
+  <button class="ic" id="kTorch" aria-label="Lanterna" aria-pressed="false" hidden><svg class="i"><use href="#i-bolt"/></svg></button>
+  <span id="kTorchGap" style="width:48px"></span>
+ </div>
+ <div class="cam" id="kBox">
+  <video id="kV" playsinline muted autoplay></video>
+  <svg id="camSvg"><polygon id="kPoly" fill="rgba(35,70,255,.18)" stroke="#5b7bff" stroke-width="6" stroke-linejoin="round" points=""/></svg>
+  <div id="camFlash"></div>
+  <p class="cmsg" id="kMsg">Aponte para o documento</p>
+ </div>
+ <div class="cbot">
+  <button class="cthumb" id="kThumb" aria-label="Páginas fotografadas"><b id="kCount">0</b></button>
+  <button class="shut" id="kShoot" aria-label="Fotografar"></button>
+  <button class="btn pri cdone" id="kDone">Concluir</button>
+ </div>
+</section>
+
 <input type="file" id="camIn" accept="image/*" capture="environment" hidden>
 <input type="file" id="galIn" accept="image/*,application/pdf,.pdf" multiple hidden>
 
@@ -218,6 +257,7 @@ const tick = () => new Promise(r => setTimeout(r, 30));
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const toBlob = (c, t, q) => new Promise((res, rej) => c.toBlob(b => b ? res(b) : rej(new Error('toBlob')), t, q));
+const defFilter = () => { try { return localStorage.getItem('defFilter') || 'magic'; } catch (e) { return 'magic'; } };
 const FILTERS = [['magic', 'Mágico'], ['orig', 'Original'], ['gray', 'Tons de cinza'], ['bw', 'Preto e branco'], ['light', 'Clarear']];
 
 /* ---------- armazenamento (IndexedDB com reserva em memória) ---------- */
@@ -246,7 +286,7 @@ async function get(s, id) { if (mem[s].has(id)) return mem[s].get(id); const o =
 async function allDocs() { const a = await tx('docs', 'readonly', st => st.getAll()); if (a) a.forEach(o => mem.docs.set(o.id, o)); return [...mem.docs.values()]; }
 
 /* ---------- interface básica ---------- */
-const VIEWS = ['home', 'doc', 'page', 'crop'];
+const VIEWS = ['home', 'doc', 'page', 'crop', 'cam'];
 let view = 'home';
 function show(v) { view = v; for (const n of VIEWS) $('#v-' + n).hidden = n !== v; }
 let tt; function toast(m) { const t = $('#toast'); t.textContent = m; t.classList.add('on'); clearTimeout(tt); tt = setTimeout(() => t.classList.remove('on'), 2800); }
@@ -341,7 +381,7 @@ function blur(a, w, h, r) {
   return o;
 }
 const area = q => Math.abs(q.reduce((s, p, i) => { const r = q[(i + 1) % 4]; return s + p[0] * r[1] - r[0] * p[1]; }, 0)) / 2;
-function detectQuad(cv) {
+function detectQuad(cv, strict) {
   const W0 = cv.width, H0 = cv.height, s = Math.min(1, 320 / Math.max(W0, H0));
   const w = Math.max(8, Math.round(W0 * s)), h = Math.max(8, Math.round(H0 * s)), n = w * h;
   const c = mk(w, h), x = cx(c); x.drawImage(cv, 0, 0, w, h);
@@ -385,6 +425,7 @@ function detectQuad(cv) {
       if (score > pickScore) { pickScore = score; pick = q; }
     }
   }
+  if (!pick && strict) return null;
   if (!pick) { const m = 0.06; return [[W0 * m, H0 * m], [W0 * (1 - m), H0 * m], [W0 * (1 - m), H0 * (1 - m)], [W0 * m, H0 * (1 - m)]]; }
   return pick.map(([px, py]) => [Math.min(W0, Math.max(0, (px + 0.5) / s)), Math.min(H0, Math.max(0, (py + 0.5) / s))]);
 }
@@ -483,20 +524,62 @@ function rotate(cv, r) {
   x.translate(o.width / 2, o.height / 2); x.rotate(r * Math.PI / 2); x.drawImage(cv, -cv.width / 2, -cv.height / 2);
   return o;
 }
-async function processPage(p) {
+let worker = null, wid = 0;
+const wjobs = new Map(), wkeys = new Map();
+function getWorker() {
+  if (worker !== null) return worker;
+  try {
+    if (typeof OffscreenCanvas === 'undefined' || !window.createImageBitmap) throw new Error('no offscreen');
+    const code = `const mk=(w,h)=>new OffscreenCanvas(w,h);const cx=c=>c.getContext('2d',{willReadFrequently:true});
+${[homography, warp, background, filterImg, rotate].map(f => f.toString()).join('\n')}
+const cache=new Map();
+onmessage=async e=>{const {id,pid,key,bmp,quad,filter,rot}=e.data;try{
+ let wc=cache.get(pid);
+ if(!wc||wc.k!==key){ if(!bmp) throw new Error('nosrc'); const c=mk(bmp.width,bmp.height); cx(c).drawImage(bmp,0,0); if(bmp.close) bmp.close(); wc={k:key,img:warp(c,quad,2200)}; cache.delete(pid); cache.set(pid,wc); while(cache.size>4) cache.delete(cache.keys().next().value); }
+ else if(bmp&&bmp.close) bmp.close();
+ const f=filterImg(wc.img,filter); let cv=mk(f.width,f.height); cv.getContext('2d').putImageData(f,0,0); cv=rotate(cv,rot);
+ const blob=await cv.convertToBlob({type:'image/jpeg',quality:0.88});
+ postMessage({id,blob,w:cv.width,h:cv.height});
+}catch(err){postMessage({id,error:String(err&&err.message||err)})}};`;
+    worker = new Worker(URL.createObjectURL(new Blob([code], { type: 'text/javascript' })));
+    worker.onmessage = e => { const j = wjobs.get(e.data.id); if (!j) return; wjobs.delete(e.data.id); e.data.error ? j.rej(new Error(e.data.error)) : j.res(e.data); };
+    worker.onerror = () => { for (const j of wjobs.values()) j.rej(new Error('worker')); wjobs.clear(); worker = false; };
+  } catch (e) { worker = false; }
+  return worker;
+}
+function runWorker(p, key, bmp) {
+  return new Promise((res, rej) => {
+    const id = ++wid; wjobs.set(id, { res, rej });
+    worker.postMessage({ id, pid: p.id, key, bmp, quad: p.quad, filter: p.filter, rot: p.rot }, bmp ? [bmp] : []);
+  });
+}
+async function processMain(p, key) {
   const src = await getSrc(p);
-  const key = p.quad.map(v => v.map(z => z.toFixed(1)).join(',')).join(';');
   let wc = warpCache.get(p.id);
   if (!wc || wc.k !== key) { wc = { k: key, img: warp(src, p.quad, 2200) }; warpCache.set(p.id, wc); trim(warpCache, 3); }
   const f = filterImg(wc.img, p.filter);
   let cv = mk(f.width, f.height); cv.getContext('2d').putImageData(f, 0, 0);
   cv = rotate(cv, p.rot);
-  p.out = await toBlob(cv, 'image/jpeg', 0.88); p.ow = cv.width; p.oh = cv.height;
+  return { blob: await toBlob(cv, 'image/jpeg', 0.88), w: cv.width, h: cv.height };
+}
+async function processPage(p) {
+  const key = p.quad.map(v => v.map(z => z.toFixed(1)).join(',')).join(';');
+  let r = null;
+  if (getWorker()) {
+    const bmpOf = async () => createImageBitmap(srcCache.get(p.id) || p.src);
+    try {
+      try { r = await runWorker(p, key, wkeys.get(p.id) === key ? null : await bmpOf()); }
+      catch (e) { if (e.message === 'nosrc') r = await runWorker(p, key, await bmpOf()); else throw e; }
+      wkeys.delete(p.id); wkeys.set(p.id, key); trim(wkeys, 4);
+    } catch (e) { r = null; }
+  }
+  if (!r) r = await processMain(p, key);
+  p.out = r.blob; p.ow = r.w; p.oh = r.h;
   await put('pages', p);
 }
 async function makePage(file) {
   const { cv, blob } = await importImage(file);
-  const p = { id: uid(), src: blob, quad: null, rot: 0, filter: 'magic' };
+  const p = { id: uid(), src: blob, quad: null, rot: 0, filter: defFilter() };
   srcCache.set(p.id, cv); trim(srcCache, 3);
   p.quad = detectQuad(cv);
   return p;
@@ -682,10 +765,121 @@ $('#dMerge').onclick = async () => {
   for (const id of r.data) { const d = await get('docs', id); if (!d) continue; curDoc.pages.push(...d.pages); n += d.pages.length; await del('docs', id); }
   await touchDoc(); await openDoc(curDoc); toast(`${n} páginas juntadas`);
 };
-$('#bCam').onclick = () => { curDoc = null; camIn.click(); };
+$('#bCam').onclick = () => { curDoc = null; startCam(); };
 $('#bGal').onclick = () => { curDoc = null; galIn.click(); };
-$('#dCam').onclick = () => camIn.click();
+$('#dCam').onclick = () => startCam();
 $('#dGal').onclick = () => galIn.click();
+
+/* ---------- câmera ao vivo (fotos em sequência) ---------- */
+let cam = null;
+const kV = $('#kV'), detCv = mk(2, 2);
+const inFrame = (() => { try { return window.top !== window; } catch (e) { return true; } })();
+let autoOn = true; try { autoOn = localStorage.getItem('autoCap') !== '0'; } catch (e) { }
+function useSystemCamera() { camIn.click(); }
+async function startCam() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || (inFrame && !NATIVE)) { useSystemCamera(); return; }
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' }, width: { ideal: 2560 }, height: { ideal: 1920 } } });
+  } catch (e) {
+    const r = await dialog({ title: 'Câmera indisponível', body: '<p>Não foi possível abrir a câmera dentro do app. Verifique se a permissão de câmera está liberada, ou use a câmera do sistema.</p>', actions: [{ label: 'Cancelar', v: null }, { label: 'Usar câmera do sistema', v: 'sys', pri: 1 }] });
+    if (r.v === 'sys') useSystemCamera();
+    return;
+  }
+  const track = stream.getVideoTracks()[0];
+  try { await track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }); } catch (e) { }
+  cam = { stream, track, doc: curDoc || newDoc(), n: 0, done: 0, queue: Promise.resolve(), stable: 0, prev: null, armed: true, last: null, busy: false, torch: false, saved: !!curDoc };
+  kV.srcObject = stream;
+  try { await kV.play(); } catch (e) { }
+  let caps = {}; try { caps = track.getCapabilities ? track.getCapabilities() : {}; } catch (e) { }
+  $('#kTorch').hidden = !caps.torch; $('#kTorchGap').hidden = !!caps.torch;
+  $('#kAuto').setAttribute('aria-pressed', autoOn);
+  $('#kCount').textContent = '0'; $('#kThumb').style.backgroundImage = ''; $('#kThumb').hidden = true;
+  show('cam'); camLoop();
+}
+function videoRect() {
+  const b = $('#kBox').getBoundingClientRect(), vw = kV.videoWidth, vh = kV.videoHeight;
+  const sc = Math.min(b.width / vw, b.height / vh);
+  return { x: (b.width - vw * sc) / 2, y: (b.height - vh * sc) / 2, w: vw * sc, h: vh * sc, vw, vh };
+}
+function drawCamQuad(q) {
+  const svg = $('#camSvg'), r = videoRect();
+  Object.assign(svg.style, { left: r.x + 'px', top: r.y + 'px', width: r.w + 'px', height: r.h + 'px' });
+  svg.setAttribute('viewBox', `0 0 ${r.vw} ${r.vh}`);
+  $('#kPoly').setAttribute('points', q ? q.map(p => p.map(v => v.toFixed(0)).join(',')).join(' ') : '');
+  $('#kPoly').setAttribute('stroke-width', Math.max(4, r.vw / 220));
+}
+const kMsg = m => { const e = $('#kMsg'); if (e.textContent !== m) e.textContent = m; };
+const ring = v => $('#kShoot').style.setProperty('--p', v);
+const maxMove = (a, b) => Math.max(...a.map((p, i) => Math.hypot(p[0] - b[i][0], p[1] - b[i][1])));
+function camLoop() {
+  if (!cam) return;
+  if (kV.videoWidth && !document.hidden) {
+    const s = Math.min(1, 300 / Math.max(kV.videoWidth, kV.videoHeight));
+    detCv.width = Math.round(kV.videoWidth * s); detCv.height = Math.round(kV.videoHeight * s);
+    cx(detCv).drawImage(kV, 0, 0, detCv.width, detCv.height);
+    let q = detectQuad(detCv, true);
+    if (q) { q = q.map(([x, y]) => [x / s, y / s]); if (area(q) < kV.videoWidth * kV.videoHeight * 0.12) q = null; }
+    drawCamQuad(q); autoLogic(q);
+  }
+  cam.timer = setTimeout(camLoop, 160);
+}
+function autoLogic(q) {
+  const D = Math.max(kV.videoWidth, kV.videoHeight);
+  if (!q) { cam.stable = 0; cam.prev = null; cam.armed = true; ring(0); kMsg(cam.n ? `${cam.n} ${cam.n === 1 ? 'página' : 'páginas'} · aponte para a próxima` : 'Aponte para o documento'); return; }
+  const moved = cam.prev ? maxMove(q, cam.prev) / D : 1; cam.prev = q;
+  if (!autoOn) { ring(0); kMsg('Documento encontrado · toque para fotografar'); return; }
+  if (cam.busy) return;
+  if (!cam.armed) {
+    if (cam.last && maxMove(q, cam.last) / D > 0.1) cam.armed = true;
+    else { ring(0); kMsg('Foto tirada · troque a página'); return; }
+  }
+  cam.stable = moved < 0.018 ? cam.stable + 1 : 0;
+  const need = 6; ring(Math.min(1, cam.stable / need));
+  kMsg(cam.stable ? 'Segure firme…' : 'Documento encontrado');
+  if (cam.stable >= need) { cam.stable = 0; shoot(); }
+}
+async function shoot() {
+  if (!cam || cam.busy || !kV.videoWidth) return;
+  cam.busy = true;
+  const c = mk(kV.videoWidth, kV.videoHeight); cx(c).drawImage(kV, 0, 0);
+  const f = $('#camFlash'); f.classList.add('on'); setTimeout(() => f.classList.remove('on'), 60);
+  try { if (navigator.vibrate) navigator.vibrate(30); } catch (e) { }
+  const q = detectQuad(c, true) || (cam.prev ? cam.prev.map(p => p.slice()) : detectQuad(c));
+  cam.last = q; cam.armed = false; ring(0);
+  const p = { id: uid(), src: null, quad: q, rot: 0, filter: defFilter() };
+  cam.n++; $('#kCount').textContent = cam.n; $('#kThumb').hidden = false;
+  const t = mk(116, Math.round(116 * c.height / c.width)); t.getContext('2d').drawImage(c, 0, 0, t.width, t.height);
+  $('#kThumb').style.backgroundImage = `url(${t.toDataURL('image/jpeg', 0.6)})`;
+  const k = cam; k.queue = k.queue.then(() => processShot(k, p, c));
+  setTimeout(() => { if (cam) cam.busy = false; }, 450);
+}
+async function processShot(k, p, c) {
+  try {
+    p.src = await toBlob(c, 'image/jpeg', 0.92);
+    srcCache.set(p.id, c); trim(srcCache, 3);
+    await processPage(p);
+    k.doc.pages.push(p.id); k.doc.updated = Date.now(); await put('docs', k.doc);
+    k.done++;
+    if (cam === k) $('#kThumb').style.backgroundImage = `url(${urlFor(p)})`;
+  } catch (e) { console.error(e); }
+}
+async function finishCam() {
+  if (!cam) return;
+  const k = cam; cam = null; clearTimeout(k.timer);
+  k.stream.getTracks().forEach(t => t.stop()); kV.srcObject = null;
+  if (k.n > k.done) { busy(`Finalizando ${k.n - k.done} ${k.n - k.done === 1 ? 'página' : 'páginas'}…`); await k.queue; busy(); }
+  if (k.doc.pages.length) { curDoc = k.doc; await openDoc(curDoc); if (k.n) toast(`${k.n} ${k.n === 1 ? 'página adicionada' : 'páginas adicionadas'}. Toque numa página para ajustar.`); }
+  else curDoc ? openDoc(curDoc) : goHome();
+}
+$('#kShoot').onclick = () => { cam && (cam.stable = 0); shoot(); };
+$('#kDone').onclick = finishCam;
+$('#kClose').onclick = finishCam;
+$('#kThumb').onclick = finishCam;
+$('#kAuto').onclick = () => { autoOn = !autoOn; $('#kAuto').setAttribute('aria-pressed', autoOn); try { localStorage.setItem('autoCap', autoOn ? '1' : '0'); } catch (e) { } toast(autoOn ? 'Captura automática ligada' : 'Captura automática desligada'); };
+$('#kTorch').onclick = async () => { if (!cam) return; cam.torch = !cam.torch; try { await cam.track.applyConstraints({ advanced: [{ torch: cam.torch }] }); $('#kTorch').setAttribute('aria-pressed', cam.torch); } catch (e) { cam.torch = false; } };
+document.addEventListener('visibilitychange', () => { if (document.hidden && cam) finishCam(); });
+addEventListener('resize', () => { if (view === 'cam') drawCamQuad(null); });
 
 /* ---------- ações ---------- */
 $('#docList').onclick = async e => { const c = e.target.closest('.card'); if (!c) return; const d = await get('docs', c.dataset.id); if (d) openDoc(d); };
@@ -699,7 +893,7 @@ $('#dDel').onclick = async () => {
   await del('docs', curDoc.id); toast('Documento excluído'); goHome();
 };
 $('#pBack').onclick = () => openDoc(curDoc);
-$('#chips').onclick = e => { const c = e.target.closest('.chip'); if (!c || c.dataset.f === curPage.filter) return; curPage.filter = c.dataset.f; reprocess('Aplicando filtro…'); };
+$('#chips').onclick = e => { const c = e.target.closest('.chip'); if (!c || c.dataset.f === curPage.filter) return; curPage.filter = c.dataset.f; try { localStorage.setItem('defFilter', c.dataset.f); } catch (e) { } reprocess('Aplicando filtro…'); };
 $('#tRl').onclick = () => { curPage.rot = (curPage.rot + 3) % 4; reprocess('Girando…'); };
 $('#tRr').onclick = () => { curPage.rot = (curPage.rot + 1) % 4; reprocess('Girando…'); };
 $('#tCrop').onclick = async () => { busy('Abrindo…'); await tick(); await openCrop(curPage, false); busy(); };
@@ -784,6 +978,7 @@ $('#dPdf').onclick = async () => {
 window.appBack = () => {
   if (!$('#busy').hidden) return true;
   if (!$('#modal').hidden) { $('#modal').hidden = true; return true; }
+  if (view === 'cam') { finishCam(); return true; }
   if (view === 'crop') { $('#cBack').click(); return true; }
   if (view === 'page') { $('#pBack').click(); return true; }
   if (view === 'doc') { $('#dBack').click(); return true; }

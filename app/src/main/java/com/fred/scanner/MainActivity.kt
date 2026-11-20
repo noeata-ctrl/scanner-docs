@@ -1,10 +1,12 @@
 package com.fred.scanner
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.ContentValues
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -12,6 +14,7 @@ import android.os.Environment
 import android.provider.MediaStore
 import android.util.Base64
 import android.webkit.JavascriptInterface
+import android.webkit.PermissionRequest
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
@@ -28,10 +31,13 @@ class MainActivity : Activity() {
     private lateinit var web: WebView
     private var fileCallback: ValueCallback<Array<Uri>>? = null
     private var cameraUri: Uri? = null
+    private var pendingWebPermission: PermissionRequest? = null
 
     companion object {
         private const val REQ_FILES = 10
         private const val REQ_CAMERA = 11
+        private const val PERM_WEB = 20
+        private const val PERM_INTENT = 21
         private const val HOST = "appassets.androidplatform.net"
     }
 
@@ -51,6 +57,7 @@ class MainActivity : Activity() {
             databaseEnabled = true
             allowFileAccess = false
             allowContentAccess = true
+            mediaPlaybackRequiresUserGesture = false
             loadWithOverviewMode = true
             useWideViewPort = true
         }
@@ -67,6 +74,14 @@ class MainActivity : Activity() {
         }
 
         web.webChromeClient = object : WebChromeClient() {
+            override fun onPermissionRequest(request: PermissionRequest) {
+                runOnUiThread {
+                    if (!request.resources.contains(PermissionRequest.RESOURCE_VIDEO_CAPTURE)) { request.deny(); return@runOnUiThread }
+                    if (hasCamera()) request.grant(arrayOf(PermissionRequest.RESOURCE_VIDEO_CAPTURE))
+                    else { pendingWebPermission?.deny(); pendingWebPermission = request; requestPermissions(arrayOf(Manifest.permission.CAMERA), PERM_WEB) }
+                }
+            }
+
             override fun onShowFileChooser(
                 view: WebView,
                 callback: ValueCallback<Array<Uri>>,
@@ -92,7 +107,30 @@ class MainActivity : Activity() {
 
     /* ---------- câmera e arquivos ---------- */
 
+    private fun hasCamera() = checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, results: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, results)
+        val ok = results.isNotEmpty() && results[0] == PackageManager.PERMISSION_GRANTED
+        when (requestCode) {
+            PERM_WEB -> {
+                val req = pendingWebPermission; pendingWebPermission = null
+                if (ok) req?.grant(arrayOf(PermissionRequest.RESOURCE_VIDEO_CAPTURE)) else req?.deny()
+            }
+            PERM_INTENT -> {
+                if (ok) launchCameraIntent()
+                else { fileCallback?.onReceiveValue(null); fileCallback = null }
+            }
+        }
+    }
+
     private fun openCamera(): Boolean {
+        // Como o app declara a permissão de câmera, o Android exige que ela esteja liberada até para a câmera do sistema.
+        if (!hasCamera()) { requestPermissions(arrayOf(Manifest.permission.CAMERA), PERM_INTENT); return true }
+        return launchCameraIntent()
+    }
+
+    private fun launchCameraIntent(): Boolean {
         return try {
             val dir = File(cacheDir, "camera").apply { mkdirs() }
             dir.listFiles()?.forEach { if (System.currentTimeMillis() - it.lastModified() > 86_400_000) it.delete() }
